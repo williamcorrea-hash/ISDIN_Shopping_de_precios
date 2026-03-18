@@ -16,11 +16,15 @@ from extractors.cruz_verde import extraer_cruz_verde
 from extractors.cutis import extraer_cutis
 from extractors.bellapiel import extraer_bellapiel
 from extractors.linea_estetica import extraer_linea_estetica
+from extractors.falabella import extraer_falabella
+from extractors.laskin import extraer_laskin
+from extractors.pasteur import extraer_pasteur
 
 
-# ============================
-# EXTRACTORES NORMALIZADOS
-# ============================
+SOLO_TIENDAS_PRUEBA = None
+# SOLO_TIENDAS_PRUEBA = ["pasteur"]
+
+
 EXTRACTORES = {
     "medipiel": extraer_medipiel,
     "farmatodo": extraer_farmatodo,
@@ -28,33 +32,27 @@ EXTRACTORES = {
     "cutis": extraer_cutis,
     "bellapiel": extraer_bellapiel,
     "lineaestetica": extraer_linea_estetica,
+    "falabella": extraer_falabella,
+    "laskin": extraer_laskin,
+    "pasteur": extraer_pasteur,
 }
 
 TIENDAS_SOPORTADAS = set(EXTRACTORES.keys())
 
 
-# ============================
-# OUTPUT PATHS (MES / DIA)
-# ============================
 def build_output_paths(base_dir: str, now: datetime):
-    """
-    output/
-      2026-02/
-        precios_2026-02-18.xlsx
-    """
     month_folder = now.strftime("%Y-%m")
     day_stamp = now.strftime("%Y-%m-%d")
 
     out_dir = os.path.join(base_dir, "output", month_folder)
     os.makedirs(out_dir, exist_ok=True)
 
-    out_file = os.path.join(out_dir, f"precios_{day_stamp}.xlsx")
+    nombre = f"precios_prueba_pasteur_{day_stamp}.xlsx"
+    out_file = os.path.join(out_dir, nombre)
+
     return out_dir, out_file
 
 
-# ============================
-# OBTENER PRECIO
-# ============================
 def obtener_precio(tienda, url, driver=None, wait=None):
     try:
         extractor = EXTRACTORES[tienda]
@@ -75,28 +73,18 @@ def obtener_precio(tienda, url, driver=None, wait=None):
         return None, None, None, f"ERROR: {str(e)}"
 
 
-# ============================
-# SELENIUM: INIT / RESTART
-# ============================
 def iniciar_driver_edge():
-    """
-    Intenta:
-    1) Usar drivers/msedgedriver.exe si existe
-    2) Si no, usar Selenium Manager (webdriver.Edge sin Service)
-    """
     from selenium import webdriver
     from selenium.webdriver.edge.options import Options as EdgeOptions
     from selenium.webdriver.edge.service import Service as EdgeService
 
     options = EdgeOptions()
-    # Si tu máquina corporativa bloquea headless, cambia a "--headless" o quítalo
     options.add_argument("--headless=new")
     options.add_argument("--disable-gpu")
     options.add_argument("--window-size=1920,1080")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--remote-debugging-port=0")
 
-    # Perfil temporal para evitar bloqueos/perfiles corporativos
     profile_dir = os.path.join(os.getcwd(), "edge_profile_tmp")
     os.makedirs(profile_dir, exist_ok=True)
     options.add_argument(f"--user-data-dir={profile_dir}")
@@ -106,7 +94,6 @@ def iniciar_driver_edge():
         service = EdgeService(executable_path=drivers_path)
         driver = webdriver.Edge(service=service, options=options)
     else:
-        # Selenium Manager intentará resolver el driver
         driver = webdriver.Edge(options=options)
 
     return driver
@@ -135,12 +122,10 @@ def procesar_slow(df_slow):
         for _, row in df_slow.iterrows():
             print(f"Procesando (páginas tipo selenium): {row.Producto} | {row.Tienda_raw}")
 
-            # 1er intento normal
             precio_normal, precio_oferta, moneda, estado = obtener_precio(
                 row.Tienda, row.URL, driver=driver, wait=wait
             )
 
-            # Si el driver murió (invalid session), reiniciar y reintentar 1 vez
             if isinstance(estado, str) and "invalid session id" in estado.lower():
                 try:
                     try:
@@ -173,39 +158,32 @@ def procesar_slow(df_slow):
     return resultados
 
 
-# ============================
-# MAIN
-# ============================
 def main():
     base_dir = os.getcwd()
     now = datetime.now()
     fecha_ejecucion = now.strftime("%Y-%m-%d %H:%M:%S")
 
-    # Leer productos
     df = pd.read_excel(os.path.join(base_dir, "data", "productos.xlsx"), sheet_name="Hoja1")
     print(f"📦 Leyendo productos: {len(df)} encontrados")
 
-    # Normalizar tiendas
     df["Tienda_raw"] = df["Tienda"]
     df["Tienda"] = df["Tienda"].apply(normalizar_tienda)
 
-    # Validar tiendas soportadas
+    if SOLO_TIENDAS_PRUEBA:
+        df = df[df["Tienda"].isin(SOLO_TIENDAS_PRUEBA)].copy()
+        print(f"🧪 Modo prueba activo. Registros filtrados: {len(df)}")
+
     tiendas_invalidas = set(df["Tienda"]) - TIENDAS_SOPORTADAS
     if tiendas_invalidas:
         raise ValueError(f"Tiendas no soportadas: {tiendas_invalidas}")
 
-    # Normalizar TIENDAS_LENTAS
     tiendas_lentas_norm = {normalizar_tienda(t) for t in TIENDAS_LENTAS}
 
-    # Separar rápidas y lentas
     df_fast = df[~df["Tienda"].isin(tiendas_lentas_norm)].copy()
     df_slow = df[df["Tienda"].isin(tiendas_lentas_norm)].copy()
 
     resultados = []
 
-    # ========================
-    # FAST (requests)
-    # ========================
     with ThreadPoolExecutor(max_workers=max_workers_requests) as executor:
         futures = {}
         for _, row in df_fast.iterrows():
@@ -227,9 +205,6 @@ def main():
                 "fecha_busqueda": fecha_ejecucion,
             })
 
-    # ========================
-    # SLOW (selenium)
-    # ========================
     try:
         resultados_slow = procesar_slow(df_slow)
     except Exception as e:
@@ -240,16 +215,11 @@ def main():
         r["fecha_busqueda"] = fecha_ejecucion
     resultados.extend(resultados_slow)
 
-    # ========================
-    # OUTPUT DIARIO (por mes)
-    # ========================
     _, output_file = build_output_paths(base_dir, now)
-
     df_out = pd.DataFrame(resultados)
-
-    # Guardar archivo del día (NO se mezcla con otros días)
     df_out.to_excel(output_file, index=False)
-    print(f"✅ Archivo diario guardado en: {output_file}")
+
+    print(f"✅ Archivo guardado en: {output_file}")
 
 
 if __name__ == "__main__":
