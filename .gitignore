@@ -1,0 +1,14 @@
+# entornos / cache
+.venv/
+__pycache__/
+*.pyc
+
+# temporales navegador
+chrome_profile_tmp/
+edge_profile_tmp/
+
+# logs
+logs/
+
+# VS Code
+.vscode/
