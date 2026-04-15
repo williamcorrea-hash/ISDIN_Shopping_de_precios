@@ -111,19 +111,40 @@ def iniciar_driver_edge():
     temp_profile = os.path.join(
         os.getcwd(),
         "edge_profile_tmp",
-        f"session_{int(time.time())}_{random.randint(1000,9999)}"
+        f"session_{int(time.time())}_{random.randint(1000, 9999)}"
     )
     os.makedirs(temp_profile, exist_ok=True)
     options.add_argument(f"--user-data-dir={temp_profile}")
 
+    # -------------------------------------------------
+    # PRIORIDAD 1: Selenium Manager (recomendado)
+    # -------------------------------------------------
+    # Esto evita quedarse amarrado a un msedgedriver.exe viejo.
+    try:
+        driver = webdriver.Edge(options=options)
+        return driver
+    except Exception as e_selenium_manager:
+        print(f"WARNING: Selenium Manager no pudo iniciar Edge: {e_selenium_manager}")
+
+    # -------------------------------------------------
+    # PRIORIDAD 2: Driver local solo como fallback
+    # -------------------------------------------------
     drivers_path = os.path.join(os.getcwd(), "drivers", "msedgedriver.exe")
     if os.path.exists(drivers_path):
-        service = EdgeService(executable_path=drivers_path)
-        driver = webdriver.Edge(service=service, options=options)
-    else:
-        driver = webdriver.Edge(options=options)
+        try:
+            service = EdgeService(executable_path=drivers_path)
+            driver = webdriver.Edge(service=service, options=options)
+            return driver
+        except Exception as e_local:
+            raise RuntimeError(
+                "No se pudo iniciar Edge ni con Selenium Manager ni con el driver local. "
+                f"Error Selenium Manager: {e_selenium_manager} | "
+                f"Error driver local: {e_local}"
+            )
 
-    return driver
+    raise RuntimeError(
+        "No se pudo iniciar Edge. Selenium Manager fallo y no existe un driver local usable."
+    )
 
 
 # ==================================
@@ -276,6 +297,18 @@ def main():
         r["fecha_busqueda"] = fecha_ejecucion
     resultados.extend(resultados_slow)
 
+    total_esperado = len(df)
+    total_obtenido = len(resultados)
+
+    print(f"Total esperado para esta tienda: {total_esperado}")
+    print(f"Total obtenido para esta tienda: {total_obtenido}")
+
+    if tienda_objetivo and total_esperado > 0 and total_obtenido == 0:
+        raise RuntimeError(
+            f"La tienda '{tienda_objetivo}' no produjo resultados. "
+            f"Esperados: {total_esperado}, obtenidos: {total_obtenido}"
+        )
+
     # OUTPUT
     etiqueta = normalizar_tienda(tienda_objetivo) if tienda_objetivo else "todas"
     _, output_file = build_output_paths(base_dir, now, etiqueta)
@@ -290,7 +323,6 @@ def main():
         print(f"El archivo estaba abierto. Guardado alterno en: {alt_output}")
         output_file = alt_output
 
-    # RESUMEN
     tiempo_total = time.time() - tiempo_inicio
     minutos = int(tiempo_total // 60)
     segundos = int(tiempo_total % 60)

@@ -4,6 +4,8 @@ import time
 import queue
 import subprocess
 import threading
+import glob
+from datetime import datetime
 
 import pandas as pd
 
@@ -11,18 +13,10 @@ from utils import normalizar_tienda
 from config import TIENDAS_LENTAS
 
 
-# ==================================
-# AJUSTES DE PARALELISMO
-# ==================================
-# Puedes probar 3 en slow. Si notas que el PC se pone inestable,
-# vuelve a 2.
-TIENDAS_SLOW_MAX_PARALELO = 3
+TIENDAS_SLOW_MAX_PARALELO = 6
 TIENDAS_FAST_MAX_PARALELO = 3
 
 
-# ==================================
-# INPUT
-# ==================================
 def get_input_file(base_dir: str) -> str:
     archivo_entrada = os.path.join(base_dir, "data", "productos.xlsx")
     if not os.path.exists(archivo_entrada):
@@ -47,9 +41,6 @@ def extraer_tiendas_del_excel(base_dir: str):
     return tiendas
 
 
-# ==================================
-# EJECUCION DE CADA TIENDA
-# ==================================
 def ejecutar_tienda(tienda: str):
     inicio = time.time()
     cmd = [sys.executable, "main.py", tienda]
@@ -65,12 +56,21 @@ def ejecutar_tienda(tienda: str):
         )
         duracion = round(time.time() - inicio, 2)
 
+        filas_generadas = None
+        for linea in (result.stdout or "").splitlines():
+            if linea.startswith("Total registros procesados:"):
+                try:
+                    filas_generadas = int(linea.split(":")[1].strip())
+                except Exception:
+                    pass
+
         return {
             "tienda": tienda,
             "returncode": result.returncode,
             "stdout": result.stdout,
             "stderr": result.stderr,
             "duracion": duracion,
+            "filas_generadas": filas_generadas,
         }
     except Exception as e:
         duracion = round(time.time() - inicio, 2)
@@ -80,6 +80,7 @@ def ejecutar_tienda(tienda: str):
             "stdout": "",
             "stderr": str(e),
             "duracion": duracion,
+            "filas_generadas": None,
         }
 
 
@@ -136,19 +137,17 @@ def imprimir_resultados(resultados, titulo):
 
     for r in sorted(resultados, key=lambda x: x["tienda"]):
         estado = "OK" if r["returncode"] == 0 else "ERROR"
-        print(f"{r['tienda']:<15} | {estado:<5} | {r['duracion']} seg")
+        filas = r["filas_generadas"] if r["filas_generadas"] is not None else "N/D"
+        print(f"{r['tienda']:<15} | {estado:<5} | {r['duracion']} seg | filas: {filas}")
 
         if r["returncode"] != 0:
             print("---- STDOUT ----")
-            print(r["stdout"][-3000:] if r["stdout"] else "")
+            print(r["stdout"][-4000:] if r["stdout"] else "")
             print("---- STDERR ----")
-            print(r["stderr"][-3000:] if r["stderr"] else "")
+            print(r["stderr"][-4000:] if r["stderr"] else "")
             print("-" * 70)
 
 
-# ==================================
-# EJECUTAR FAST Y SLOW A LA VEZ
-# ==================================
 def correr_fast_y_slow_en_paralelo(tiendas_fast, tiendas_slow):
     resultados_fast = []
     resultados_slow = []
@@ -173,9 +172,6 @@ def correr_fast_y_slow_en_paralelo(tiendas_fast, tiendas_slow):
     return resultados_fast, resultados_slow
 
 
-# ==================================
-# MAIN
-# ==================================
 def main():
     tiempo_inicio = time.time()
     base_dir = os.getcwd()
