@@ -116,19 +116,12 @@ def iniciar_driver_edge():
     os.makedirs(temp_profile, exist_ok=True)
     options.add_argument(f"--user-data-dir={temp_profile}")
 
-    # -------------------------------------------------
-    # PRIORIDAD 1: Selenium Manager (recomendado)
-    # -------------------------------------------------
-    # Esto evita quedarse amarrado a un msedgedriver.exe viejo.
     try:
         driver = webdriver.Edge(options=options)
         return driver
     except Exception as e_selenium_manager:
         print(f"WARNING: Selenium Manager no pudo iniciar Edge: {e_selenium_manager}")
 
-    # -------------------------------------------------
-    # PRIORIDAD 2: Driver local solo como fallback
-    # -------------------------------------------------
     drivers_path = os.path.join(os.getcwd(), "drivers", "msedgedriver.exe")
     if os.path.exists(drivers_path):
         try:
@@ -138,13 +131,9 @@ def iniciar_driver_edge():
         except Exception as e_local:
             raise RuntimeError(
                 "No se pudo iniciar Edge ni con Selenium Manager ni con el driver local. "
-                f"Error Selenium Manager: {e_selenium_manager} | "
-                f"Error driver local: {e_local}"
             )
 
-    raise RuntimeError(
-        "No se pudo iniciar Edge. Selenium Manager fallo y no existe un driver local usable."
-    )
+    raise RuntimeError("No se pudo iniciar Edge. Selenium Manager fallo y no existe un driver local usable.")
 
 
 # ==================================
@@ -217,15 +206,12 @@ def cargar_datos(base_dir: str, tienda_objetivo: str | None):
     archivo_entrada = get_input_file(base_dir)
     df = pd.read_excel(archivo_entrada, sheet_name="Hoja1")
 
-    print(f"Leyendo productos: {len(df)} encontrados")
-
     df["Tienda_raw"] = df["Tienda"]
     df["Tienda"] = df["Tienda"].apply(normalizar_tienda)
 
     if tienda_objetivo:
         tienda_norm = normalizar_tienda(tienda_objetivo)
         df = df[df["Tienda"] == tienda_norm].copy()
-        print(f"Filtro por tienda '{tienda_objetivo}': {len(df)} registros")
 
         if df.empty:
             raise ValueError(f"No se encontraron registros para la tienda: {tienda_objetivo}")
@@ -256,9 +242,6 @@ def main():
     df_fast = df[~df["Tienda"].isin(tiendas_lentas_norm)].copy()
     df_slow = df[df["Tienda"].isin(tiendas_lentas_norm)].copy()
 
-    print(f"Registros fast: {len(df_fast)}")
-    print(f"Registros slow: {len(df_slow)}")
-
     resultados = []
 
     # FAST
@@ -267,7 +250,6 @@ def main():
             futures = {}
 
             for _, row in df_fast.iterrows():
-                print(f"Procesando (requests): {row.Producto} | {row.Tienda_raw}")
                 future = executor.submit(obtener_precio, row.Tienda, row.URL)
                 futures[future] = row
 
@@ -297,18 +279,6 @@ def main():
         r["fecha_busqueda"] = fecha_ejecucion
     resultados.extend(resultados_slow)
 
-    total_esperado = len(df)
-    total_obtenido = len(resultados)
-
-    print(f"Total esperado para esta tienda: {total_esperado}")
-    print(f"Total obtenido para esta tienda: {total_obtenido}")
-
-    if tienda_objetivo and total_esperado > 0 and total_obtenido == 0:
-        raise RuntimeError(
-            f"La tienda '{tienda_objetivo}' no produjo resultados. "
-            f"Esperados: {total_esperado}, obtenidos: {total_obtenido}"
-        )
-
     # OUTPUT
     etiqueta = normalizar_tienda(tienda_objetivo) if tienda_objetivo else "todas"
     _, output_file = build_output_paths(base_dir, now, etiqueta)
@@ -316,11 +286,9 @@ def main():
 
     try:
         df_out.to_excel(output_file, index=False)
-        print(f"Archivo guardado en: {output_file}")
     except PermissionError:
         alt_output = output_file.replace(".xlsx", "_v2.xlsx")
         df_out.to_excel(alt_output, index=False)
-        print(f"El archivo estaba abierto. Guardado alterno en: {alt_output}")
         output_file = alt_output
 
     tiempo_total = time.time() - tiempo_inicio

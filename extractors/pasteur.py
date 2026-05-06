@@ -2,9 +2,7 @@ import os
 import re
 import time
 
-
 PRECIO_REGEX = re.compile(r'\$\s*(\d{1,3}(?:\.\d{3})+)')
-
 
 def limpiar_precio_token(token):
     if token is None:
@@ -22,7 +20,6 @@ def limpiar_precio_token(token):
 
     return None
 
-
 def extraer_precios_texto(texto):
     if not texto:
         return []
@@ -33,7 +30,6 @@ def extraer_precios_texto(texto):
     valores = [v for v in valores if 10000 <= v <= 500000]
 
     return list(dict.fromkeys(valores))
-
 
 def guardar_debug(url, body_text, page_source):
     try:
@@ -55,7 +51,6 @@ def guardar_debug(url, body_text, page_source):
     except Exception:
         pass
 
-
 def cerrar_banners(driver):
     from selenium.webdriver.common.by import By
 
@@ -75,7 +70,6 @@ def cerrar_banners(driver):
                     time.sleep(1)
         except Exception:
             pass
-
 
 def contiene_indicador_descuento(texto):
     if not texto:
@@ -98,7 +92,6 @@ def contiene_indicador_descuento(texto):
     ]
 
     return any(x in t for x in indicadores)
-
 
 def es_texto_auxiliar_no_descuento(texto):
     """
@@ -137,7 +130,6 @@ def es_texto_auxiliar_no_descuento(texto):
 
     return False
 
-
 def extraer_precio_principal_desde_texto(texto):
     """
     Devuelve solo el precio principal visible.
@@ -148,7 +140,6 @@ def extraer_precio_principal_desde_texto(texto):
         return None
 
     return max(vals)
-
 
 def extraer_descuento_desde_texto(texto):
     """
@@ -174,7 +165,6 @@ def extraer_descuento_desde_texto(texto):
 
     return None
 
-
 def extraer_pasteur(url, driver=None, wait=None):
     if driver is None:
         raise Exception("Pasteur requiere Selenium driver (no se pasó driver)")
@@ -195,6 +185,24 @@ def extraer_pasteur(url, driver=None, wait=None):
     except Exception:
         pass
 
+    # ==========================================
+    # 1. VERIFICACIÓN DE PRODUCTO AGOTADO
+    # ==========================================
+    # Buscamos botones o textos que indiquen falta de inventario
+    try:
+        agotado = driver.find_elements(
+            By.XPATH, 
+            "//*[contains(translate(text(), 'AGOTADO', 'agotado'), 'agotado') or contains(translate(text(), 'NO DISPONIBLE', 'no disponible'), 'no disponible')]"
+        )
+        if len(agotado) > 0:
+            print(f"[INFO] Producto Agotado en Pasteur: {url}")
+            return 0, 0, "COP"
+    except Exception:
+        pass
+
+    # ==========================================
+    # 2. EXTRACCIÓN DE PRECIOS
+    # ==========================================
     textos_candidatos = []
 
     # 1) bloque de compra / precio
@@ -261,7 +269,16 @@ def extraer_pasteur(url, driver=None, wait=None):
     if mejor_precio_normal is not None:
         return mejor_precio_normal, mejor_precio_oferta, "COP"
 
+    # ==========================================
+    # 3. REVISIÓN DE EMERGENCIA ANTES DE FALLAR
+    # ==========================================
     body_text = driver.find_element(By.TAG_NAME, "body").text
+    
+    # Si llegó hasta aquí sin precio, revisamos el texto completo por si el "agotado" estaba oculto
+    if "agotado" in body_text.lower() or "no disponible" in body_text.lower():
+        print(f"[INFO] Producto detectado como Agotado en revisión profunda (Pasteur): {url}")
+        return 0, 0, "COP"
+
     guardar_debug(url, body_text, driver.page_source)
 
     raise Exception("No se encontró precio en Pasteur")
